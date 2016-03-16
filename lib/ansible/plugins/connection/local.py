@@ -43,10 +43,8 @@ except ImportError:
 class Connection(ConnectionBase):
     ''' Local based connections '''
 
-    @property
-    def transport(self):
-        ''' used to identify this connection object '''
-        return 'local'
+    transport = 'local'
+    has_pipelining = True
 
     def _connect(self):
         ''' connect to the local host; nothing to do here '''
@@ -68,8 +66,6 @@ class Connection(ConnectionBase):
 
         display.debug("in local.exec_command()")
 
-        if in_data:
-            raise AnsibleError("Internal Error: this module does not support optimized module pipelining")
         executable = C.DEFAULT_EXECUTABLE.split()[0] if C.DEFAULT_EXECUTABLE else None
 
         display.vvv(u"{0} EXEC {1}".format(self._play_context.remote_addr, cmd))
@@ -115,7 +111,7 @@ class Connection(ConnectionBase):
             fcntl.fcntl(p.stderr, fcntl.F_SETFL, fcntl.fcntl(p.stderr, fcntl.F_GETFL) & ~os.O_NONBLOCK)
 
         display.debug("getting output with communicate()")
-        stdout, stderr = p.communicate()
+        stdout, stderr = p.communicate(in_data)
         display.debug("done communicating")
 
         display.debug("done with local.exec_command()")
