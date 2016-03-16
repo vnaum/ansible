@@ -80,6 +80,9 @@ class ShellBase(object):
 
         return cmd
 
+    def put_file_with_become(self, remote_path, bufsize=65536):
+        return 'touch %(path)s %(and)s chmod 0700 %(path)s %(and)s dd of=%(path)s bs=%(bufsize)s' % {'and': self._SHELL_AND, 'path': remote_path, 'bufsize': bufsize}
+
     def expand_user(self, user_home_path):
         ''' Return a command to expand tildes in a path
 

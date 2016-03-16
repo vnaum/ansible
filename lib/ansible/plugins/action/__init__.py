@@ -203,12 +203,10 @@ class ActionBase(with_metaclass(ABCMeta, object)):
         if self._play_context.become and self._play_context.become_user != 'root':
             use_system_tmp = True
 
-        tmp_mode = None
-        if self._play_context.remote_user != 'root' or self._play_context.become and self._play_context.become_user != 'root':
-            tmp_mode = 0o755
+        tmp_mode = 0o700
 
         cmd = self._connection._shell.mkdtemp(basefile, use_system_tmp, tmp_mode)
-        result = self._low_level_execute_command(cmd, sudoable=False)
+        result = self._low_level_execute_command(cmd, sudoable=True)
 
         # error handling on this seems a little aggressive?
         if result['rc'] != 0:
@@ -279,6 +277,31 @@ class ActionBase(with_metaclass(ABCMeta, object)):
             self._connection.put_file(afile, remote_path)
         finally:
             os.unlink(afile)
+
+        return remote_path
+
+    def _transfer_module_data(self, remote_path, data):
+        '''
+        Copies the module data out to the temporary module path.
+        '''
+
+        if isinstance(data, dict):
+            data = jsonify(data)
+
+        BUFSIZE = 65536
+        try:
+            data = to_bytes(data, errors='strict')
+        except UnicodeError as e:
+            raise AnsibleError("failure encoding module into utf-8: %s" % str(e))
+
+        cmd = self._connection._shell.put_file_with_become(remote_path, BUFSIZE)
+        ret = self._low_level_execute_command(cmd, in_data=data)
+
+        if ret['rc'] != 0:
+            if 'command not found' in ret['stderr'] or 'command not found' in ret['stdout']:
+                raise AnsibleError("Transfering modules when using become to an unprivileged user requires dd in PATH on the remote machine")
+            else:
+                raise AnsibleError("Error transferring module to remote machine")
 
         return remote_path
 
@@ -448,25 +471,19 @@ class ActionBase(with_metaclass(ABCMeta, object)):
 
         if remote_module_path or module_style != 'new':
             display.debug("transferring module to remote")
-            self._transfer_data(remote_module_path, module_data)
+            self._transfer_module_data(remote_module_path, module_data)
             if module_style == 'old':
                 # we need to dump the module args to a k=v string in a file on
                 # the remote system, which can be read and parsed by the module
                 args_data = ""
                 for k,v in iteritems(module_args):
                     args_data += '%s="%s" ' % (k, pipes.quote(text_type(v)))
-                self._transfer_data(args_file_path, args_data)
+                self._transfer_module_data(args_file_path, args_data)
             elif module_style == 'non_native_want_json':
-                self._transfer_data(args_file_path, json.dumps(module_args))
+                self._transfer_module_data(args_file_path, json.dumps(module_args))
             display.debug("done transferring module to remote")
 
         environment_string = self._compute_environment_string()
-
-        if tmp and "tmp" in tmp and self._play_context.become and self._play_context.become_user != 'root':
-            # deal with possible umask issues once sudo'ed to other user
-            self._remote_chmod('a+r', remote_module_path)
-            if args_file_path is not None:
-                self._remote_chmod('a+r', args_file_path)
 
         cmd = ""
         in_data = None
