@@ -151,11 +151,11 @@ class ActionModule(ActionBase):
             if self._play_context.diff:
                 diff = self._get_diff_data(dest, path, task_vars)
 
-            xfered = self._transfer_data('src', resultant)
+            xfered = self._transfer_module_data('src', resultant)
 
             # fix file permissions when the copy is done as a different user
-            if self._play_context.become and self._play_context.become_user != 'root':
-                self._remote_chmod('a+r', xfered)
+            #if self._play_context.become and self._play_context.become_user != 'root':
+            #    self._remote_chmod('a+r', xfered)
 
             new_module_args.update( dict( src=xfered,))
 

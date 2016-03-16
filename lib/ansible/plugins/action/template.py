@@ -160,11 +160,11 @@ class ActionModule(ActionBase):
                 diff = self._get_diff_data(dest, resultant, task_vars, source_file=False)
 
             if not self._play_context.check_mode: # do actual work thorugh copy
-                xfered = self._transfer_data(self._connection._shell.join_path(tmp, 'source'), resultant)
+                xfered = self._transfer_module_data(self._connection._shell.join_path(tmp, 'source'), resultant)
 
                 # fix file permissions when the copy is done as a different user
-                if self._play_context.become and self._play_context.become_user != 'root':
-                    self._remote_chmod('a+r', xfered)
+                #if self._play_context.become and self._play_context.become_user != 'root':
+                #    self._remote_chmod('a+r', xfered)
 
                 # run the copy module
                 new_module_args.update(
