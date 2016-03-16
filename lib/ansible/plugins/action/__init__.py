@@ -294,7 +294,7 @@ class ActionBase(with_metaclass(ABCMeta, object)):
         except UnicodeError as e:
             raise AnsibleError("failure encoding module into utf-8: %s" % str(e))
 
-        cmd = self._connection._shell.put_file_with_become(remote_path, BUFSIZE)
+        cmd = self._connection._shell.put_file_with_become(remote_path, bufsize=BUFSIZE)
         ret = self._low_level_execute_command(cmd, in_data=data)
 
         if ret['rc'] != 0:
@@ -304,6 +304,8 @@ class ActionBase(with_metaclass(ABCMeta, object)):
                 raise AnsibleError("Error transferring module to remote machine")
 
         return remote_path
+    # Migrating this functionality into put_file
+    _transfer_module_data = _transfer_data
 
     def _remote_chmod(self, mode, path, sudoable=False):
         '''

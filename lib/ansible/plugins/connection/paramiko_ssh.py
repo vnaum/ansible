@@ -126,10 +126,8 @@ SFTP_CONNECTION_CACHE = {}
 class Connection(ConnectionBase):
     ''' SSH based connections with Paramiko '''
 
-    @property
-    def transport(self):
-        ''' used to identify this connection object from other classes '''
-        return 'paramiko'
+    transport = 'paramiko'
+    has_pipelining = True
 
     def _cache_key(self):
         return "%s__%s__" % (self._play_context.remote_addr, self._play_context.remote_user)
@@ -253,8 +251,8 @@ class Connection(ConnectionBase):
 
         super(Connection, self).exec_command(cmd, in_data=in_data, sudoable=sudoable)
 
-        if in_data:
-            raise AnsibleError("Internal Error: this module does not support optimized module pipelining")
+        #if in_data:
+        #    raise AnsibleError("Internal Error: this module does not support optimized module pipelining")
 
         bufsize = 4096
 
@@ -311,6 +309,8 @@ class Connection(ConnectionBase):
         except socket.timeout:
             raise AnsibleError('ssh timed out waiting for privilege escalation.\n' + become_output)
 
+        if in_data:
+            chan.sendall(in_data + '\n')
         stdout = ''.join(chan.makefile('rb', bufsize))
         stderr = ''.join(chan.makefile_stderr('rb', bufsize))
 

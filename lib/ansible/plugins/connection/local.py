@@ -19,9 +19,11 @@ from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
 import os
+import stat
+import select
 import shutil
 import subprocess
-import select
+import traceback
 import fcntl
 import getpass
 
@@ -30,7 +32,7 @@ from ansible.compat.six import text_type, binary_type
 import ansible.constants as C
 
 from ansible.errors import AnsibleError, AnsibleFileNotFound
-from ansible.plugins.connection import ConnectionBase
+from ansible.plugins.connection import ConnectionBase, BUFSIZE
 from ansible.utils.unicode import to_bytes, to_str
 
 try:
@@ -59,13 +61,7 @@ class Connection(ConnectionBase):
             self._connected = True
         return self
 
-    def exec_command(self, cmd, in_data=None, sudoable=True):
-        ''' run a command on the local host '''
-
-        super(Connection, self).exec_command(cmd, in_data=in_data, sudoable=sudoable)
-
-        display.debug("in local.exec_command()")
-
+    def _buffered_exec_command(self, cmd, stdin=subprocess.PIPE, sudoable=True):
         executable = C.DEFAULT_EXECUTABLE.split()[0] if C.DEFAULT_EXECUTABLE else None
 
         display.vvv(u"{0} EXEC {1}".format(self._play_context.remote_addr, cmd))
@@ -107,13 +103,38 @@ class Connection(ConnectionBase):
                 become_output += chunk
             if not self.check_become_success(become_output):
                 p.stdin.write(self._play_context.become_pass + '\n')
+
             fcntl.fcntl(p.stdout, fcntl.F_SETFL, fcntl.fcntl(p.stdout, fcntl.F_GETFL) & ~os.O_NONBLOCK)
             fcntl.fcntl(p.stderr, fcntl.F_SETFL, fcntl.fcntl(p.stderr, fcntl.F_GETFL) & ~os.O_NONBLOCK)
+
+        if stdin != subprocess.PIPE:
+            fcntl.fcntl(p.stdin, fcntl.F_SETFL, fcntl.fcntl(p.stdin, fcntl.F_GETFL) | os.O_NONBLOCK)
+            try:
+                readsize = select.PIPE_BUF
+            except AttributeError:
+                readsize = 512
+            chunk = stdin.read(readsize)
+            while chunk:
+                rfd, wfd, efd = select.select([], [p.stdin], [], self._play_context.timeout)
+                if len(wfd) == 0:
+                    raise AnsibleError('timeout waiting to transfer data')
+                p.stdin.write(chunk)
+                chunk = stdin.read(readsize)
+            fcntl.fcntl(p.stdin, fcntl.F_SETFL, fcntl.fcntl(p.stdin, fcntl.F_GETFL) & ~os.O_NONBLOCK)
+
+        return p
+
+    def exec_command(self, cmd, in_data=None, sudoable=True):
+        ''' run a command on the local host '''
+
+        super(Connection, self).exec_command(cmd, in_data=in_data, sudoable=sudoable)
+
+        display.debug("in local.exec_command()")
+        p = self._buffered_exec_command(cmd, sudoable=sudoable)
 
         display.debug("getting output with communicate()")
         stdout, stderr = p.communicate(in_data)
         display.debug("done communicating")
-
         display.debug("done with local.exec_command()")
         return (p.returncode, stdout, stderr)
 
@@ -123,14 +144,32 @@ class Connection(ConnectionBase):
         super(Connection, self).put_file(in_path, out_path)
 
         display.vvv(u"{0} PUT {1} TO {2}".format(self._play_context.remote_addr, in_path, out_path))
-        if not os.path.exists(to_bytes(in_path, errors='strict')):
+        in_path = to_bytes(in_path, errors='strict')
+        if not os.path.exists(in_path):
             raise AnsibleFileNotFound("file or module does not exist: {0}".format(to_str(in_path)))
-        try:
-            shutil.copyfile(to_bytes(in_path, errors='strict'), to_bytes(out_path, errors='strict'))
-        except shutil.Error:
-            raise AnsibleError("failed to copy: {0} and {1} are the same".format(to_str(in_path), to_str(out_path)))
-        except IOError as e:
-            raise AnsibleError("failed to transfer file to {0}: {1}".format(to_str(out_path), to_str(e)))
+
+        mode = stat.S_IMODE(os.stat(in_path).st_mode)
+        cmd = self._shell.put_file_with_become(out_path, mode=mode, bufsize=BUFSIZE)
+
+        sudoable = False
+        allow_same_user = C.BECOME_ALLOW_SAME_USER
+        same_user = self._play_context.become_user == self._play_context.remote_user
+        if self._play_context.become and (allow_same_user or not same_user):
+            cmd = self._play_context.make_become_cmd(cmd)
+            sudoable = True
+
+        with open(in_path, 'rb') as in_file:
+            try:
+                p = self._buffered_exec_command(cmd, in_file, sudoable=sudoable)
+            except OSError:
+                raise AnsibleError("local connection requires dd to put files")
+            try:
+                stdout, stderr = p.communicate()
+            except:
+                traceback.print_exc()
+                raise AnsibleError("failed to transfer file %s to %s" % (in_path, out_path))
+            if p.returncode != 0:
+                raise AnsibleError("failed to transfer file %s to %s:\n%s\n%s" % (in_path, out_path, stdout, stderr))
 
     def fetch_file(self, in_path, out_path):
         ''' fetch a file from local to local -- for copatibility '''

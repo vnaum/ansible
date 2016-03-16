@@ -40,6 +40,8 @@ except ImportError:
     from ansible.utils.display import Display
     display = Display()
 
+BUFSIZE = 65536
+
 __all__ = ['ConnectionBase', 'ensure_connect']
 
 
