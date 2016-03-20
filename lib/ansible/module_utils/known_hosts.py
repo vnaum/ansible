@@ -48,12 +48,13 @@ def add_git_host_key(module, url, accept_hostkey=True, create_dir=True):
     if is_ssh_url(url):
 
         fqdn = get_fqdn(url)
+        port = get_port(url)
 
         if fqdn:
             known_host = check_hostkey(module, fqdn)
             if not known_host:
                 if accept_hostkey:
-                    rc, out, err = add_host_key(module, fqdn, create_dir=create_dir)
+                    rc, out, err = add_host_key(module, fqdn, create_dir=create_dir, port=port)
                     if rc != 0:
                         module.fail_json(msg="failed to add %s hostkey: %s" % (fqdn, out + err))
                 else:
@@ -69,6 +70,16 @@ def is_ssh_url(url):
         if url.startswith(scheme):
             return True
     return False
+
+def get_port(repo_url):
+
+    """ chop the port number out of a url """
+
+    result = None
+    mo = re.search(':(\d+)/', repo_url)
+    if mo:
+        result = int(mo.group(1))
+    return result
 
 def get_fqdn(repo_url):
 
@@ -159,7 +170,7 @@ def not_in_host_file(self, host):
     return True
 
 
-def add_host_key(module, fqdn, key_type="rsa", create_dir=False):
+def add_host_key(module, fqdn, key_type="rsa", create_dir=False, port=None):
 
     """ use ssh-keyscan to add the hostkey """
 
@@ -184,7 +195,10 @@ def add_host_key(module, fqdn, key_type="rsa", create_dir=False):
     elif not os.path.isdir(user_ssh_dir):
         module.fail_json(msg="%s is not a directory" % user_ssh_dir)
 
-    this_cmd = "%s -t %s %s" % (keyscan_cmd, key_type, fqdn)
+    port_param = ""
+    if port:
+        port_param = "-p %i" % port
+    this_cmd = "%s -t %s %s %s" % (keyscan_cmd, key_type, port_param, fqdn)
 
     rc, out, err = module.run_command(this_cmd)
     module.append_to_file(user_host_file, out)
